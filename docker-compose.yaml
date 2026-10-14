@@ -85,6 +85,9 @@ x-airflow-common:
     # AIRFLOW_VAR_{VARIABLE_NAME}
     AIRFLOW_VAR_API_KEY: ${API_KEY}
     AIRFLOW_VAR_CHANNEL_HANDLE: ${CHANNEL_HANDLE}
+    # Webserver: fewer gunicorn workers + longer startup timeout (fixes 'No response from gunicorn master within 120 seconds')
+    AIRFLOW__WEBSERVER__WORKERS: 2
+    AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: 300
     # Postgres databases environment variables - Needed for integration and data quality tests
     ELT_DATABASE_NAME: ${ELT_DATABASE_NAME}
     ELT_DATABASE_USERNAME: ${ELT_DATABASE_USERNAME}
@@ -168,7 +171,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      start_period: 180s
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
