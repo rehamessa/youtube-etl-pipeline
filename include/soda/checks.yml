@@ -1,0 +1,16 @@
+checks for yt_api:
+  # Video_ID is the primary key: no nulls and no duplicates
+  - missing_count("Video_ID") = 0
+  - duplicate_count("Video_ID") = 0
+
+  # A video cannot have more likes than views
+  - likes_count_greater_than_video_views = 0:
+      name: Check for Likes_Count greater than Video_Views
+      likes_count_greater_than_video_views query: |
+        SELECT COUNT(*) FROM yt_api WHERE "Likes_Count" > "Video_Views";
+
+  # A video cannot have more comments than views
+  - comments_count_greater_than_video_views = 0:
+      name: Check for Comments_Count greater than Video_Views
+      comments_count_greater_than_video_views query: |
+        SELECT COUNT(*) FROM yt_api WHERE "Comments_Count" > "Video_Views";
