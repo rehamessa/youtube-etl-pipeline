@@ -1,8 +1,13 @@
+import os
+
+import psycopg2
 import pytest
 from unittest import mock
 
 from airflow.models import Variable, Connection, DagBag
 
+
+# ---------- Unit test fixtures (mock values) ----------
 
 @pytest.fixture
 def api_key():
@@ -38,3 +43,44 @@ def mock_postgres_conn_vars():
 def dagbag():
     # Loads every DAG found in the dags folder
     yield DagBag()
+
+
+# ---------- Integration test fixtures (real values) ----------
+
+@pytest.fixture
+def airflow_variable():
+    # Returns a helper that reads the real value of an Airflow variable from the environment
+    def get_airflow_variable(variable_name):
+        env_var = f"AIRFLOW_VAR_{variable_name.upper()}"
+        return os.getenv(env_var)
+
+    return get_airflow_variable
+
+
+@pytest.fixture
+def real_postgres_connection():
+    dbname = os.getenv("ELT_DATABASE_NAME")
+    user = os.getenv("ELT_DATABASE_USERNAME")
+    password = os.getenv("ELT_DATABASE_PASSWORD")
+    host = os.getenv("POSTGRES_CONN_HOST")
+    port = os.getenv("POSTGRES_CONN_PORT")
+
+    conn = None
+
+    try:
+        conn = psycopg2.connect(
+            dbname=dbname,
+            user=user,
+            password=password,
+            host=host,
+            port=port,
+        )
+        yield conn
+
+    except psycopg2.Error as e:
+        pytest.fail(f"Failed to connect to the database: {e}")
+
+    finally:
+        # Always close the connection, even if the test failed
+        if conn:
+            conn.close()
