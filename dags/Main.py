@@ -9,6 +9,7 @@ from api.video_stats import (
     save_to_json,
 )
 from datawarehouse.dwh import staging_table, core_table
+from dataquality.soda import yt_elt_data_quality
 
 # Local timezone (Egypt)
 local_tz = pendulum.timezone("Africa/Cairo")
@@ -24,6 +25,10 @@ default_args = {
     "dagrun_timeout": timedelta(hours=1),
     "start_date": datetime(2026, 1, 1, tzinfo=local_tz),
 }
+
+# Schema names used by the data quality DAG
+staging_schema = "staging"
+core_schema = "core"
 
 # DAG 1: extract data from the YouTube API and save it as JSON
 with DAG(
@@ -59,3 +64,20 @@ with DAG(
 
     # Task dependencies
     update_staging >> update_core
+
+
+# DAG 3: run Soda data quality checks on both layers
+with DAG(
+    dag_id="data_quality",
+    default_args=default_args,
+    description="DAG to check the data quality on both layers in the database",
+    schedule="0 16 * * *",  # Every day at 4 PM, after update_db
+    catchup=False,
+) as dag_quality:
+
+    # Define tasks
+    soda_validate_staging = yt_elt_data_quality(staging_schema)
+    soda_validate_core = yt_elt_data_quality(core_schema)
+
+    # Task dependencies
+    soda_validate_staging >> soda_validate_core
