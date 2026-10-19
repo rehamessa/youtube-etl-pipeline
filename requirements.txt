@@ -1,2 +1,2 @@
 soda-core-postgres
-pytest
+pytest==8.3.3
