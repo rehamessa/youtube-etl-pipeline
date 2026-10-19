@@ -1,4 +1,4 @@
-name: CI-CD Pipeline
+﻿name: CI-CD Pipeline
 
 on:
   push:
@@ -52,3 +52,87 @@ jobs:
           tags: |
             ${{ vars.DOCKERHUB_NAMESPACE }}/${{ vars.DOCKERHUB_REPOSITORY }}:latest
             ${{ vars.DOCKERHUB_NAMESPACE }}/${{ vars.DOCKERHUB_REPOSITORY }}:${{ github.sha }}
+
+  unit-integration-e2e-tests:
+    name: Unit, integration and E2E tests
+    runs-on: ubuntu-latest
+    # Run only after the image job has finished
+    needs: build-and-push-image
+
+    # Replace the local .env file: docker compose reads these values
+    env:
+      # Docker image
+      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
+      DOCKERHUB_REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
+      IMAGE_TAG: latest
+      AIRFLOW_UID: ${{ vars.AIRFLOW_UID }}
+
+      # Airflow UI user
+      AIRFLOW_WWW_USER_USERNAME: ${{ secrets.AIRFLOW_WWW_USER_USERNAME }}
+      AIRFLOW_WWW_USER_PASSWORD: ${{ secrets.AIRFLOW_WWW_USER_PASSWORD }}
+      FERNET_KEY: ${{ secrets.FERNET_KEY }}
+
+      # YouTube API
+      API_KEY: ${{ secrets.API_KEY }}
+      CHANNEL_HANDLE: ${{ vars.CHANNEL_HANDLE }}
+
+      # Postgres server
+      POSTGRES_CONN_HOST: ${{ vars.POSTGRES_CONN_HOST }}
+      POSTGRES_CONN_PORT: ${{ vars.POSTGRES_CONN_PORT }}
+      POSTGRES_CONN_USERNAME: ${{ secrets.POSTGRES_CONN_USERNAME }}
+      POSTGRES_CONN_PASSWORD: ${{ secrets.POSTGRES_CONN_PASSWORD }}
+
+      # Airflow metadata database
+      METADATA_DATABASE_NAME: ${{ vars.METADATA_DATABASE_NAME }}
+      METADATA_DATABASE_USERNAME: ${{ secrets.METADATA_DATABASE_USERNAME }}
+      METADATA_DATABASE_PASSWORD: ${{ secrets.METADATA_DATABASE_PASSWORD }}
+
+      # Celery result backend database
+      CELERY_BACKEND_NAME: ${{ vars.CELERY_BACKEND_NAME }}
+      CELERY_BACKEND_USERNAME: ${{ secrets.CELERY_BACKEND_USERNAME }}
+      CELERY_BACKEND_PASSWORD: ${{ secrets.CELERY_BACKEND_PASSWORD }}
+
+      # ELT data warehouse database
+      ELT_DATABASE_NAME: ${{ vars.ELT_DATABASE_NAME }}
+      ELT_DATABASE_USERNAME: ${{ secrets.ELT_DATABASE_USERNAME }}
+      ELT_DATABASE_PASSWORD: ${{ secrets.ELT_DATABASE_PASSWORD }}
+
+    steps:
+      # Get the repository code into the runner
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Check if the pipeline code, the soda configs or docker compose changed
+      - name: Check if DAGs, include or docker compose changed
+        id: changed-files-tests
+        uses: tj-actions/changed-files@v45
+        with:
+          files: |
+            dags/**
+            include/**
+            docker-compose.yaml
+
+      # Start all the Airflow services
+      - name: Start Docker Compose
+        if: steps.changed-files-tests.outputs.any_changed == 'true'
+        run: docker compose up -d
+
+      # CI: run the unit and integration tests inside the worker container
+      - name: Run unit and integration tests
+        if: steps.changed-files-tests.outputs.any_changed == 'true'
+        run: docker exec airflow-worker sh -c "pytest tests/ -v"
+
+      # CD: run every DAG end to end, in order
+      - name: Run E2E DAG tests
+        if: steps.changed-files-tests.outputs.any_changed == 'true'
+        run: |
+          DAG_IDS=("produce_json" "update_db" "data_quality")
+          for dag_id in "${DAG_IDS[@]}"; do
+            echo "Running E2E test for DAG: $dag_id"
+            docker exec airflow-worker airflow dags test "$dag_id"
+          done
+
+      # Clean up: stop and remove the containers and volumes
+      - name: Tear down Docker Compose
+        if: always() && steps.changed-files-tests.outputs.any_changed == 'true'
+        run: docker compose down -v
