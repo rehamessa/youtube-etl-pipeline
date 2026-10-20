@@ -1,0 +1,62 @@
+{
+  "name": "Mokhbir Eqtisadi Dark",
+  "dataColors": [
+    "#F5B700",
+    "#E63946",
+    "#F1F1F1",
+    "#8D99AE",
+    "#FFD95A",
+    "#A4161A",
+    "#5C677D",
+    "#C9A227"
+  ],
+  "background": "#0F0F0F",
+  "foreground": "#F1F1F1",
+  "tableAccent": "#F5B700",
+  "good": "#2EC4B6",
+  "neutral": "#F5B700",
+  "bad": "#E63946",
+  "maximum": "#F5B700",
+  "center": "#5C677D",
+  "minimum": "#1C1C1C",
+  "textClasses": {
+    "title": { "fontFace": "Segoe UI Semibold", "fontSize": 14, "color": "#F5B700" },
+    "header": { "fontFace": "Segoe UI Semibold", "fontSize": 12, "color": "#F1F1F1" },
+    "label": { "fontFace": "Segoe UI", "fontSize": 10, "color": "#BFBFBF" },
+    "callout": { "fontFace": "Segoe UI Bold", "fontSize": 28, "color": "#F5B700" }
+  },
+  "visualStyles": {
+    "*": {
+      "*": {
+        "background": [{ "show": true, "color": { "solid": { "color": "#1C1C1C" } }, "transparency": 0 }],
+        "border": [{ "show": true, "color": { "solid": { "color": "#2B2B2B" } }, "radius": 8 }],
+        "title": [{ "show": true, "fontColor": { "solid": { "color": "#F5B700" } }, "fontSize": 12 }],
+        "visualHeader": [{ "show": false }]
+      }
+    },
+    "page": {
+      "*": {
+        "background": [{ "color": { "solid": { "color": "#0F0F0F" } }, "transparency": 0 }],
+        "outspace": [{ "color": { "solid": { "color": "#0F0F0F" } } }]
+      }
+    },
+    "card": {
+      "*": {
+        "labels": [{ "color": { "solid": { "color": "#F5B700" } }, "fontSize": 26 }],
+        "categoryLabels": [{ "color": { "solid": { "color": "#BFBFBF" } }, "fontSize": 10 }]
+      }
+    },
+    "slicer": {
+      "*": {
+        "items": [{ "fontColor": { "solid": { "color": "#F1F1F1" } }, "background": { "solid": { "color": "#1C1C1C" } } }],
+        "header": [{ "fontColor": { "solid": { "color": "#F5B700" } } }]
+      }
+    },
+    "tableEx": {
+      "*": {
+        "columnHeaders": [{ "fontColor": { "solid": { "color": "#0F0F0F" } }, "backColor": { "solid": { "color": "#F5B700" } } }],
+        "values": [{ "fontColorPrimary": { "solid": { "color": "#F1F1F1" } }, "backColorPrimary": { "solid": { "color": "#1C1C1C" } }, "fontColorSecondary": { "solid": { "color": "#F1F1F1" } }, "backColorSecondary": { "solid": { "color": "#242424" } } }]
+      }
+    }
+  }
+}
