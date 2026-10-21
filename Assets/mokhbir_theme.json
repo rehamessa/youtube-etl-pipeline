@@ -1,61 +1,61 @@
 {
-  "name": "Mokhbir Eqtisadi Dark",
+  "name": "Mokhbir Eqtisadi",
   "dataColors": [
-    "#F5B700",
-    "#E63946",
-    "#F1F1F1",
-    "#8D99AE",
-    "#FFD95A",
-    "#A4161A",
-    "#5C677D",
-    "#C9A227"
+    "#4A93A0",
+    "#F0C8A8",
+    "#F5F5F5",
+    "#2F6F7A",
+    "#8CC2CB",
+    "#D9A07E",
+    "#8A8A8A",
+    "#5A6B70"
   ],
-  "background": "#0F0F0F",
-  "foreground": "#F1F1F1",
-  "tableAccent": "#F5B700",
-  "good": "#2EC4B6",
-  "neutral": "#F5B700",
-  "bad": "#E63946",
-  "maximum": "#F5B700",
-  "center": "#5C677D",
-  "minimum": "#1C1C1C",
+  "background": "#262626",
+  "foreground": "#F5F5F5",
+  "tableAccent": "#4A93A0",
+  "good": "#4A93A0",
+  "neutral": "#F0C8A8",
+  "bad": "#D9645A",
+  "maximum": "#4A93A0",
+  "center": "#8CC2CB",
+  "minimum": "#333333",
   "textClasses": {
-    "title": { "fontFace": "Segoe UI Semibold", "fontSize": 14, "color": "#F5B700" },
-    "header": { "fontFace": "Segoe UI Semibold", "fontSize": 12, "color": "#F1F1F1" },
-    "label": { "fontFace": "Segoe UI", "fontSize": 10, "color": "#BFBFBF" },
-    "callout": { "fontFace": "Segoe UI Bold", "fontSize": 28, "color": "#F5B700" }
+    "title": { "fontFace": "Segoe UI Semibold", "fontSize": 13, "color": "#F5F5F5" },
+    "header": { "fontFace": "Segoe UI Semibold", "fontSize": 12, "color": "#F0C8A8" },
+    "label": { "fontFace": "Segoe UI", "fontSize": 10, "color": "#C8C8C8" },
+    "callout": { "fontFace": "Segoe UI Bold", "fontSize": 28, "color": "#F5F5F5" }
   },
   "visualStyles": {
     "*": {
       "*": {
-        "background": [{ "show": true, "color": { "solid": { "color": "#1C1C1C" } }, "transparency": 0 }],
-        "border": [{ "show": true, "color": { "solid": { "color": "#2B2B2B" } }, "radius": 8 }],
-        "title": [{ "show": true, "fontColor": { "solid": { "color": "#F5B700" } }, "fontSize": 12 }],
+        "background": [{ "show": true, "color": { "solid": { "color": "#333333" } }, "transparency": 0 }],
+        "border": [{ "show": true, "color": { "solid": { "color": "#4A93A0" } }, "radius": 10 }],
+        "title": [{ "show": true, "fontColor": { "solid": { "color": "#F5F5F5" } }, "fontSize": 12 }],
         "visualHeader": [{ "show": false }]
       }
     },
     "page": {
       "*": {
-        "background": [{ "color": { "solid": { "color": "#0F0F0F" } }, "transparency": 0 }],
-        "outspace": [{ "color": { "solid": { "color": "#0F0F0F" } } }]
+        "background": [{ "color": { "solid": { "color": "#262626" } }, "transparency": 0 }],
+        "outspace": [{ "color": { "solid": { "color": "#262626" } } }]
       }
     },
     "card": {
       "*": {
-        "labels": [{ "color": { "solid": { "color": "#F5B700" } }, "fontSize": 26 }],
-        "categoryLabels": [{ "color": { "solid": { "color": "#BFBFBF" } }, "fontSize": 10 }]
+        "labels": [{ "color": { "solid": { "color": "#F5F5F5" } }, "fontSize": 26 }],
+        "categoryLabels": [{ "color": { "solid": { "color": "#F0C8A8" } }, "fontSize": 10 }]
       }
     },
     "slicer": {
       "*": {
-        "items": [{ "fontColor": { "solid": { "color": "#F1F1F1" } }, "background": { "solid": { "color": "#1C1C1C" } } }],
-        "header": [{ "fontColor": { "solid": { "color": "#F5B700" } } }]
+        "items": [{ "fontColor": { "solid": { "color": "#F5F5F5" } }, "background": { "solid": { "color": "#333333" } } }],
+        "header": [{ "fontColor": { "solid": { "color": "#F0C8A8" } } }]
       }
     },
     "tableEx": {
       "*": {
-        "columnHeaders": [{ "fontColor": { "solid": { "color": "#0F0F0F" } }, "backColor": { "solid": { "color": "#F5B700" } } }],
-        "values": [{ "fontColorPrimary": { "solid": { "color": "#F1F1F1" } }, "backColorPrimary": { "solid": { "color": "#1C1C1C" } }, "fontColorSecondary": { "solid": { "color": "#F1F1F1" } }, "backColorSecondary": { "solid": { "color": "#242424" } } }]
+        "columnHeaders": [{ "fontColor": { "solid": { "color": "#FFFFFF" } }, "backColor": { "solid": { "color": "#4A93A0" } } }],
+        "values": [{ "fontColorPrimary": { "solid": { "color": "#F5F5F5" } }, "backColorPrimary": { "solid": { "color": "#333333" } }, "fontColorSecondary": { "solid": { "color": "#F5F5F5" } }, "backColorSecondary": { "solid": { "color": "#3C3C3C" } } }]
       }
     }
   }
