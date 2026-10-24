@@ -157,7 +157,7 @@ ECharts visual. Every page reacts to the year slicer.
 ### Overview
 
 <!-- Replace with your screenshot -->
-![Overview](Assets/overview.png)
+![Overview](Assets/Overview-img.png)
 
 Total views, videos, median views and engagement, long-form vs Shorts views per year,
 the latest video and the top 5 videos of all time.
@@ -165,7 +165,7 @@ the latest video and the top 5 videos of all time.
 ### Content Analysis
 
 <!-- Replace with your screenshot -->
-![Content Analysis](Assets/content_analysis.png)
+![Content Analysis](Assets/content-analysis-img.png)
 
 Best day to publish, the video length sweet spot, a weekday x year heatmap and a
 long-form vs Shorts face-off.
