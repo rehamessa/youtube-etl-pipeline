@@ -1,10 +1,12 @@
-﻿import re
+import re
 
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
 from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.inspection import permutation_importance
 from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_val_score
@@ -13,11 +15,11 @@ from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_va
 # Written in the normalized form produced by normalize_text()
 STOPWORDS = {
     "\u0627\u0644\u0645\u062e\u0628\u0631", "\u0627\u0644\u0627\u0642\u062a\u0635\u0627\u062f\u064a",  # channel name
-    "من", "في", "علي", "الي", "عن", "مع", "هل", "كيف", "لماذا", "ماذا", "ما", "متي",
-    "و", "او", "ثم", "ان", "هذا", "هذه", "ذلك", "تلك", "التي", "الذي", "الذين",
-    "بعد", "قبل", "كل", "بين", "لا", "لم", "لن", "قد", "هو", "هي", "هم", "انت",
-    "انا", "نحن", "عند", "حتي", "اذا", "بس", "ايه", "ازاي", "يعني", "مش", "ليه",
-    "اللي", "علشان", "عشان", "ده", "دي", "دا", "يا", "بقي", "كان", "كانت", "يكون",
+    "\u0645\u0646", "\u0641\u064a", "\u0639\u0644\u064a", "\u0627\u0644\u064a", "\u0639\u0646", "\u0645\u0639", "\u0647\u0644", "\u0643\u064a\u0641", "\u0644\u0645\u0627\u0630\u0627", "\u0645\u0627\u0630\u0627", "\u0645\u0627", "\u0645\u062a\u064a",
+    "\u0648", "\u0627\u0648", "\u062b\u0645", "\u0627\u0646", "\u0647\u0630\u0627", "\u0647\u0630\u0647", "\u0630\u0644\u0643", "\u062a\u0644\u0643", "\u0627\u0644\u062a\u064a", "\u0627\u0644\u0630\u064a", "\u0627\u0644\u0630\u064a\u0646",
+    "\u0628\u0639\u062f", "\u0642\u0628\u0644", "\u0643\u0644", "\u0628\u064a\u0646", "\u0644\u0627", "\u0644\u0645", "\u0644\u0646", "\u0642\u062f", "\u0647\u0648", "\u0647\u064a", "\u0647\u0645", "\u0627\u0646\u062a",
+    "\u0627\u0646\u0627", "\u0646\u062d\u0646", "\u0639\u0646\u062f", "\u062d\u062a\u064a", "\u0627\u0630\u0627", "\u0628\u0633", "\u0627\u064a\u0647", "\u0627\u0632\u0627\u064a", "\u064a\u0639\u0646\u064a", "\u0645\u0634", "\u0644\u064a\u0647",
+    "\u0627\u0644\u0644\u064a", "\u0639\u0644\u0634\u0627\u0646", "\u0639\u0634\u0627\u0646", "\u062f\u0647", "\u062f\u064a", "\u062f\u0627", "\u064a\u0627", "\u0628\u0642\u064a", "\u0643\u0627\u0646", "\u0643\u0627\u0646\u062a", "\u064a\u0643\u0648\u0646",
     "the", "a", "an", "of", "to", "and", "in", "on", "for", "with", "is", "vs",
     "you", "your", "my", "we", "it", "this", "that", "how", "why", "what", "do",
     "can", "would", "are", "be", "at", "by", "from", "or",
@@ -26,7 +28,7 @@ STOPWORDS = {
 # Words of 2+ letters only (Arabic or Latin), no digits
 TOKEN_PATTERN = r"(?u)\b[^\W\d_]{2,}\b"
 
-# Numeric features used by the success model (topic is added as one-hot columns)
+# Numeric features used by the success model (topic_id is added as one more column)
 FEATURE_COLUMNS = [
     "duration_minutes",
     "is_short",
@@ -41,10 +43,10 @@ FEATURE_COLUMNS = [
 
 def normalize_text(text):
     # Remove Arabic diacritics and tatweel
-    text = re.sub(r"[ً-ْـ]", "", str(text))
+    text = re.sub(r"[\u064b-\u0652\u0640]", "", str(text))
     # Unify letter variants so the same word is always spelled the same way
-    text = re.sub(r"[إأآ]", "ا", text)
-    text = text.replace("ى", "ي").replace("ة", "ه")
+    text = re.sub(r"[\u0625\u0623\u0622]", "\u0627", text)
+    text = text.replace("\u0649", "\u064a").replace("\u0629", "\u0647")
     # Punctuation becomes a space
     text = re.sub(r"[^\w\s]", " ", text)
     return re.sub(r"\s+", " ", text).strip().lower()
@@ -108,8 +110,8 @@ def add_features(df):
     out["upload_month"] = upload.dt.month
     out["is_short"] = (out["video_type"] == "Shorts").astype(int)
     out["title_words"] = out["title"].astype(str).str.split().str.len()
-    out["title_has_question"] = out["title"].astype(str).str.contains(r"[?؟]").astype(int)
-    out["title_has_number"] = out["title"].astype(str).str.contains(r"[0-9٠-٩]").astype(int)
+    out["title_has_question"] = out["title"].astype(str).str.contains(r"[?\u061f]").astype(int)
+    out["title_has_number"] = out["title"].astype(str).str.contains(r"[0-9\u0660-\u0669]").astype(int)
 
     return out
 
@@ -131,14 +133,12 @@ def train_success_model(df, random_state=42):
     """Train a random forest that predicts is_success.
 
     Returns (predictions DataFrame, feature importance DataFrame, metrics dict).
-    The probabilities are out-of-fold, so each video is scored by a model
-    that never saw it during training.
+    Everything is measured on videos the model did not see during training:
+    - the probabilities are out-of-fold
+    - the importance is permutation importance on the held-out fold
     """
-    X = pd.get_dummies(
-        df[FEATURE_COLUMNS + ["topic_id"]].astype({"topic_id": str}),
-        columns=["topic_id"],
-        prefix="topic",
-    ).astype(float)
+    # topic_id is kept as one column so its importance is measured as a whole
+    X = df[FEATURE_COLUMNS + ["topic_id"]].rename(columns={"topic_id": "topic"}).astype(float)
     y = df["is_success"].astype(int)
 
     if y.nunique() < 2:
@@ -153,25 +153,34 @@ def train_success_model(df, random_state=42):
     )
 
     n_splits = int(min(5, y.value_counts().min()))
-    if n_splits >= 2:
-        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
-        roc_auc = float(cross_val_score(model, X, y, cv=cv, scoring="roc_auc").mean())
-        proba = cross_val_predict(model, X, y, cv=cv, method="predict_proba")[:, 1]
-    else:
-        # Too few videos in one class for cross validation
-        roc_auc = float("nan")
-        proba = model.fit(X, y).predict_proba(X)[:, 1]
+    if n_splits < 2:
+        raise ValueError("Not enough videos in each class for cross validation")
 
-    # Final model on all videos, used for the feature importance
-    model.fit(X, y)
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+    roc_auc = float(cross_val_score(model, X, y, cv=cv, scoring="roc_auc").mean())
+    proba = cross_val_predict(model, X, y, cv=cv, method="predict_proba")[:, 1]
 
-    importance = pd.Series(model.feature_importances_, index=X.columns)
-    # The one-hot topic columns are summed into a single "topic" feature
-    importance = (
-        importance.groupby(lambda col: "topic" if col.startswith("topic_") else col)
-        .sum()
-        .sort_values(ascending=False)
-    )
+    # Permutation importance: shuffle one column on unseen videos and measure
+    # how much the ROC AUC drops. Unlike the built-in importance, it does not
+    # favour columns with many different values (like duration in minutes).
+    drops = []
+    for train_idx, test_idx in cv.split(X, y):
+        fold_model = clone(model).fit(X.iloc[train_idx], y.iloc[train_idx])
+        result = permutation_importance(
+            fold_model,
+            X.iloc[test_idx],
+            y.iloc[test_idx],
+            scoring="roc_auc",
+            n_repeats=10,
+            random_state=random_state,
+        )
+        drops.append(result.importances_mean)
+
+    # A negative drop means the column did not help: count it as 0
+    mean_drop = np.clip(np.mean(drops, axis=0), 0, None)
+    # Shares that add up to 100%, so the dashboard can show percentages
+    share = mean_drop / mean_drop.sum() if mean_drop.sum() > 0 else mean_drop
+    importance = pd.Series(share, index=X.columns).sort_values(ascending=False)
 
     predictions = pd.DataFrame({
         "video_id": df["video_id"].values,
