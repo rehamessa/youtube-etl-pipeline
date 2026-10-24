@@ -1,4 +1,4 @@
-import re
+﻿import re
 
 import numpy as np
 import pandas as pd
@@ -12,6 +12,7 @@ from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_va
 # Common Arabic (MSA + Egyptian) and English words that say nothing about the topic.
 # Written in the normalized form produced by normalize_text()
 STOPWORDS = {
+    "\u0627\u0644\u0645\u062e\u0628\u0631", "\u0627\u0644\u0627\u0642\u062a\u0635\u0627\u062f\u064a",  # channel name
     "من", "في", "علي", "الي", "عن", "مع", "هل", "كيف", "لماذا", "ماذا", "ما", "متي",
     "و", "او", "ثم", "ان", "هذا", "هذه", "ذلك", "تلك", "التي", "الذي", "الذين",
     "بعد", "قبل", "كل", "بين", "لا", "لم", "لن", "قد", "هو", "هي", "هم", "انت",
