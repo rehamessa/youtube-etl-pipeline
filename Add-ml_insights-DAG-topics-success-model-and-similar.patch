@@ -1,0 +1,625 @@
+From 0711c575b1f6bd840aca9a9dde6197e09d279a48 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 24 Oct 2026 17:43:29 +0300
+Subject: [PATCH] Add ml_insights DAG: topics, success model and similar videos
+
+Builds TF-IDF/KMeans topics from video titles, a random forest that
+predicts whether a video beats its upload-year median, and title-based
+similar videos, all written to reporting.ml_* tables for Power BI.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNd9rvmJYVFYUC2kC1xmx2
+---
+ .github/workflows/ci-cd-youtube-elt.yaml |   2 +-
+ dags/Main.py                             |  22 ++-
+ dags/ml/features.py                      | 220 +++++++++++++++++++++++
+ dags/ml/insights.py                      | 182 +++++++++++++++++++
+ requirements.txt                         |   6 +-
+ tests/ml_test.py                         |  85 +++++++++
+ tests/unit_test.py                       |   5 +-
+ 7 files changed, 517 insertions(+), 5 deletions(-)
+ create mode 100644 dags/ml/features.py
+ create mode 100644 dags/ml/insights.py
+ create mode 100644 tests/ml_test.py
+
+diff --git a/.github/workflows/ci-cd-youtube-elt.yaml b/.github/workflows/ci-cd-youtube-elt.yaml
+index d4ddb9e..d90a288 100644
+--- a/.github/workflows/ci-cd-youtube-elt.yaml
++++ b/.github/workflows/ci-cd-youtube-elt.yaml
+@@ -126,7 +126,7 @@ jobs:
+       - name: Run E2E DAG tests
+         if: steps.changed-files-tests.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'
+         run: |
+-          DAG_IDS=("produce_json" "update_db" "data_quality")
++          DAG_IDS=("produce_json" "update_db" "data_quality" "ml_insights")
+           for dag_id in "${DAG_IDS[@]}"; do
+             echo "Running E2E test for DAG: $dag_id"
+             docker exec airflow-worker airflow dags test "$dag_id"
+diff --git a/dags/Main.py b/dags/Main.py
+index 676d107..2507b1f 100644
+--- a/dags/Main.py
++++ b/dags/Main.py
+@@ -10,6 +10,7 @@ from api.video_stats import (
+ )
+ from datawarehouse.dwh import staging_table, core_table
+ from dataquality.soda import yt_elt_data_quality
++from ml.insights import build_video_topics, train_success, similar_videos
+ 
+ # Local timezone (Egypt)
+ local_tz = pendulum.timezone("Africa/Cairo")
+@@ -80,4 +81,23 @@ with DAG(
+     soda_validate_core = yt_elt_data_quality(core_schema)
+ 
+     # Task dependencies
+-    soda_validate_staging >> soda_validate_core
+\ No newline at end of file
++    soda_validate_staging >> soda_validate_core
++
++
++# DAG 4: machine learning insights for the Power BI dashboard
++with DAG(
++    dag_id="ml_insights",
++    default_args=default_args,
++    description="DAG to build topics, a success model and similar videos into the reporting schema",
++    schedule="0 17 * * *",  # Every day at 5 PM, after data_quality
++    catchup=False,
++) as dag_ml:
++
++    # Define tasks
++    topics = build_video_topics()
++    success = train_success()
++    similar = similar_videos()
++
++    # Task dependencies: the success model uses the topics as a feature,
++    # similar videos does not depend on anything
++    topics >> success
+diff --git a/dags/ml/features.py b/dags/ml/features.py
+new file mode 100644
+index 0000000..c8c5a0f
+--- /dev/null
++++ b/dags/ml/features.py
+@@ -0,0 +1,220 @@
++import re
++
++import numpy as np
++import pandas as pd
++from sklearn.cluster import KMeans
++from sklearn.ensemble import RandomForestClassifier
++from sklearn.feature_extraction.text import TfidfVectorizer
++from sklearn.metrics import silhouette_score
++from sklearn.metrics.pairwise import cosine_similarity
++from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_val_score
++
++# Common Arabic (MSA + Egyptian) and English words that say nothing about the topic.
++# Written in the normalized form produced by normalize_text()
++STOPWORDS = {
++    "من", "في", "علي", "الي", "عن", "مع", "هل", "كيف", "لماذا", "ماذا", "ما", "متي",
++    "و", "او", "ثم", "ان", "هذا", "هذه", "ذلك", "تلك", "التي", "الذي", "الذين",
++    "بعد", "قبل", "كل", "بين", "لا", "لم", "لن", "قد", "هو", "هي", "هم", "انت",
++    "انا", "نحن", "عند", "حتي", "اذا", "بس", "ايه", "ازاي", "يعني", "مش", "ليه",
++    "اللي", "علشان", "عشان", "ده", "دي", "دا", "يا", "بقي", "كان", "كانت", "يكون",
++    "the", "a", "an", "of", "to", "and", "in", "on", "for", "with", "is", "vs",
++    "you", "your", "my", "we", "it", "this", "that", "how", "why", "what", "do",
++    "can", "would", "are", "be", "at", "by", "from", "or",
++}
++
++# Words of 2+ letters only (Arabic or Latin), no digits
++TOKEN_PATTERN = r"(?u)\b[^\W\d_]{2,}\b"
++
++# Numeric features used by the success model (topic is added as one-hot columns)
++FEATURE_COLUMNS = [
++    "duration_minutes",
++    "is_short",
++    "weekday",
++    "upload_hour",
++    "upload_month",
++    "title_words",
++    "title_has_question",
++    "title_has_number",
++]
++
++
++def normalize_text(text):
++    # Remove Arabic diacritics and tatweel
++    text = re.sub(r"[ً-ْـ]", "", str(text))
++    # Unify letter variants so the same word is always spelled the same way
++    text = re.sub(r"[إأآ]", "ا", text)
++    text = text.replace("ى", "ي").replace("ة", "ه")
++    # Punctuation becomes a space
++    text = re.sub(r"[^\w\s]", " ", text)
++    return re.sub(r"\s+", " ", text).strip().lower()
++
++
++def build_topics(titles, k_range=range(5, 11), random_state=42):
++    """Group titles into topics with TF-IDF + KMeans.
++
++    The number of topics is the k with the best silhouette score.
++    Returns (topic_id per title, DataFrame with one row per topic).
++    """
++    clean = [normalize_text(t) for t in titles]
++
++    vectorizer = TfidfVectorizer(
++        token_pattern=TOKEN_PATTERN,
++        stop_words=list(STOPWORDS),
++        ngram_range=(1, 2),
++        min_df=2,
++        max_df=0.5,
++        sublinear_tf=True,
++    )
++    X = vectorizer.fit_transform(clean)
++
++    best_k, best_score, best_model = None, -1.0, None
++    for k in k_range:
++        # Need more titles than clusters for the silhouette score
++        if k >= X.shape[0]:
++            continue
++        model = KMeans(n_clusters=k, n_init=10, random_state=random_state).fit(X)
++        if len(set(model.labels_)) < 2:
++            continue
++        score = silhouette_score(X, model.labels_, metric="cosine")
++        if score > best_score:
++            best_k, best_score, best_model = k, score, model
++
++    if best_model is None:
++        raise ValueError("Not enough titles to build topics")
++
++    # Topic label = the words closest to the centre of each cluster
++    terms = vectorizer.get_feature_names_out()
++    topics = []
++    for topic_id in range(best_k):
++        top_idx = np.argsort(best_model.cluster_centers_[topic_id])[::-1]
++        top_terms = [terms[i] for i in top_idx[:5]]
++        topics.append({
++            "topic_id": topic_id,
++            "topic_label": " / ".join(top_terms[:3]),
++            "top_terms": ", ".join(top_terms),
++        })
++
++    return best_model.labels_.astype(int), pd.DataFrame(topics)
++
++
++def add_features(df):
++    """Add the model features computed from the upload date, type and title."""
++    out = df.copy()
++    upload = pd.to_datetime(out["upload_date"])
++
++    out["weekday"] = upload.dt.dayofweek
++    out["upload_hour"] = upload.dt.hour
++    out["upload_month"] = upload.dt.month
++    out["is_short"] = (out["video_type"] == "Shorts").astype(int)
++    out["title_words"] = out["title"].astype(str).str.split().str.len()
++    out["title_has_question"] = out["title"].astype(str).str.contains(r"[?؟]").astype(int)
++    out["title_has_number"] = out["title"].astype(str).str.contains(r"[0-9٠-٩]").astype(int)
++
++    return out
++
++
++def add_success_label(df):
++    """A video is a success when it beats the median views of its upload year.
++
++    Comparing inside the same year removes most of the age effect:
++    older videos had more time to collect views.
++    """
++    out = df.copy()
++    year = pd.to_datetime(out["upload_date"]).dt.year
++    year_median = out.groupby(year)["views"].transform("median")
++    out["is_success"] = (out["views"] > year_median).astype(int)
++    return out
++
++
++def train_success_model(df, random_state=42):
++    """Train a random forest that predicts is_success.
++
++    Returns (predictions DataFrame, feature importance DataFrame, metrics dict).
++    The probabilities are out-of-fold, so each video is scored by a model
++    that never saw it during training.
++    """
++    X = pd.get_dummies(
++        df[FEATURE_COLUMNS + ["topic_id"]].astype({"topic_id": str}),
++        columns=["topic_id"],
++        prefix="topic",
++    ).astype(float)
++    y = df["is_success"].astype(int)
++
++    if y.nunique() < 2:
++        raise ValueError("is_success has only one class, cannot train the model")
++
++    model = RandomForestClassifier(
++        n_estimators=300,
++        max_depth=6,
++        min_samples_leaf=5,
++        class_weight="balanced",
++        random_state=random_state,
++    )
++
++    n_splits = int(min(5, y.value_counts().min()))
++    if n_splits >= 2:
++        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
++        roc_auc = float(cross_val_score(model, X, y, cv=cv, scoring="roc_auc").mean())
++        proba = cross_val_predict(model, X, y, cv=cv, method="predict_proba")[:, 1]
++    else:
++        # Too few videos in one class for cross validation
++        roc_auc = float("nan")
++        proba = model.fit(X, y).predict_proba(X)[:, 1]
++
++    # Final model on all videos, used for the feature importance
++    model.fit(X, y)
++
++    importance = pd.Series(model.feature_importances_, index=X.columns)
++    # The one-hot topic columns are summed into a single "topic" feature
++    importance = (
++        importance.groupby(lambda col: "topic" if col.startswith("topic_") else col)
++        .sum()
++        .sort_values(ascending=False)
++    )
++
++    predictions = pd.DataFrame({
++        "video_id": df["video_id"].values,
++        "success_probability": np.round(proba, 4),
++        "is_success": y.values,
++    })
++    importance_df = pd.DataFrame({
++        "feature": importance.index,
++        "importance": np.round(importance.values, 4),
++    })
++    metrics = {
++        "roc_auc": round(roc_auc, 4),
++        "videos": float(len(df)),
++        "success_rate": round(float(y.mean()), 4),
++    }
++
++    return predictions, importance_df, metrics
++
++
++def find_similar_videos(df, top_n=5):
++    """For each video, the top_n videos with the most similar title.
++
++    Character n-grams work better than words for Arabic, because the same
++    word appears with different prefixes and suffixes.
++    """
++    clean = [normalize_text(t) for t in df["title"]]
++    vectorizer = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5), sublinear_tf=True)
++    X = vectorizer.fit_transform(clean)
++
++    sim = cosine_similarity(X)
++    # A video must not be similar to itself
++    np.fill_diagonal(sim, -1)
++
++    ids = df["video_id"].tolist()
++    top_n = min(top_n, len(ids) - 1)
++    out = []
++    for i, video_id in enumerate(ids):
++        nearest = np.argsort(sim[i])[::-1][:top_n]
++        for pos, j in enumerate(nearest, start=1):
++            out.append({
++                "video_id": video_id,
++                "similar_video_id": ids[j],
++                "similarity": round(float(sim[i, j]), 4),
++                "similar_rank": pos,
++            })
++
++    return pd.DataFrame(out)
+diff --git a/dags/ml/insights.py b/dags/ml/insights.py
+new file mode 100644
+index 0000000..9797096
+--- /dev/null
++++ b/dags/ml/insights.py
+@@ -0,0 +1,182 @@
++import logging
++from datetime import datetime
++
++import pandas as pd
++from airflow.decorators import task
++from psycopg2.extras import execute_values
++
++from datawarehouse.data_utils import get_conn_cursor, close_conn_cursor
++from ml.features import (
++    add_features,
++    add_success_label,
++    build_topics,
++    find_similar_videos,
++    train_success_model,
++)
++
++logger = logging.getLogger(__name__)
++
++# The ML results go next to the Power BI views
++schema = "reporting"
++
++
++def read_query(sql):
++    conn, cur = get_conn_cursor()
++    try:
++        cur.execute(sql)
++        return pd.DataFrame(cur.fetchall())
++    finally:
++        close_conn_cursor(conn, cur)
++
++
++def load_videos():
++    df = read_query("""
++        SELECT "Video_ID", "Video_Title", "Upload_Date", "Duration",
++               "Video_Type", "Video_Views"
++        FROM core.yt_api;
++    """)
++
++    df = df.rename(columns={
++        "Video_ID": "video_id",
++        "Video_Title": "title",
++        "Upload_Date": "upload_date",
++        "Duration": "duration",
++        "Video_Type": "video_type",
++        "Video_Views": "views",
++    })
++
++    # Duration is a TIME column -> minutes as a number
++    df["duration_minutes"] = df["duration"].apply(
++        lambda t: t.hour * 60 + t.minute + t.second / 60
++    )
++    df["views"] = df["views"].fillna(0).astype(int)
++
++    return df
++
++
++def to_python(value):
++    # psycopg2 can't write numpy types (np.int64, np.float64), so convert them
++    return value.item() if hasattr(value, "item") else value
++
++
++def write_table(table_name, columns_sql, df):
++    """Replace the content of reporting.<table_name> with df.
++
++    The table is created once and then emptied on every run (TRUNCATE),
++    so Power BI keeps the same table between refreshes.
++    """
++    conn, cur = get_conn_cursor()
++    try:
++        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema};")
++        cur.execute(f"CREATE TABLE IF NOT EXISTS {schema}.{table_name} ({columns_sql});")
++        cur.execute(f"TRUNCATE {schema}.{table_name};")
++
++        columns = ", ".join(df.columns)
++        values = [tuple(to_python(v) for v in row) for row in df.itertuples(index=False)]
++        execute_values(cur, f"INSERT INTO {schema}.{table_name} ({columns}) VALUES %s", values)
++
++        # One commit: the table is never left half empty
++        conn.commit()
++        logger.info(f"{schema}.{table_name}: {len(df)} rows written")
++
++    except Exception as e:
++        conn.rollback()
++        logger.error(f"Failed to write {schema}.{table_name}: {e}")
++        raise e
++
++    finally:
++        close_conn_cursor(conn, cur)
++
++
++@task
++def build_video_topics():
++    df = load_videos()
++
++    topic_ids, topics = build_topics(df["title"].tolist())
++    df["topic_id"] = topic_ids
++
++    # How each topic performs
++    summary = (
++        df.groupby("topic_id")["views"]
++        .agg(videos="count", median_views="median", avg_views="mean")
++        .reset_index()
++    )
++    topics = topics.merge(summary, on="topic_id")
++    topics["median_views"] = topics["median_views"].round().astype(int)
++    topics["avg_views"] = topics["avg_views"].round().astype(int)
++
++    write_table(
++        "ml_topics",
++        """topic_id INT PRIMARY KEY,
++           topic_label TEXT,
++           top_terms TEXT,
++           videos INT,
++           median_views BIGINT,
++           avg_views BIGINT""",
++        topics[["topic_id", "topic_label", "top_terms", "videos", "median_views", "avg_views"]],
++    )
++    write_table(
++        "ml_video_topics",
++        """video_id VARCHAR(11) PRIMARY KEY,
++           topic_id INT""",
++        df[["video_id", "topic_id"]],
++    )
++
++    logger.info(f"Built {len(topics)} topics")
++
++
++@task
++def train_success():
++    df = load_videos()
++
++    # Topics come from the build_video_topics task
++    video_topics = read_query(f"SELECT video_id, topic_id FROM {schema}.ml_video_topics;")
++    df = df.merge(video_topics, on="video_id", how="left")
++    df["topic_id"] = df["topic_id"].fillna(-1).astype(int)
++
++    df = add_success_label(add_features(df))
++    predictions, importance, metrics = train_success_model(df)
++
++    write_table(
++        "ml_video_predictions",
++        """video_id VARCHAR(11) PRIMARY KEY,
++           success_probability NUMERIC(6, 4),
++           is_success INT""",
++        predictions,
++    )
++    write_table(
++        "ml_feature_importance",
++        """feature TEXT PRIMARY KEY,
++           importance NUMERIC(6, 4)""",
++        importance,
++    )
++
++    run_at = datetime.now()
++    metrics_df = pd.DataFrame(
++        [{"metric": name, "value": value, "run_at": run_at} for name, value in metrics.items()]
++    )
++    write_table(
++        "ml_model_metrics",
++        """metric TEXT PRIMARY KEY,
++           value NUMERIC,
++           run_at TIMESTAMP""",
++        metrics_df,
++    )
++
++    logger.info(f"Success model metrics: {metrics}")
++
++
++@task
++def similar_videos():
++    df = load_videos()
++    similar = find_similar_videos(df, top_n=5)
++
++    write_table(
++        "ml_similar_videos",
++        """video_id VARCHAR(11),
++           similar_video_id VARCHAR(11),
++           similarity NUMERIC(6, 4),
++           similar_rank INT,
++           PRIMARY KEY (video_id, similar_rank)""",
++        similar,
++    )
+diff --git a/requirements.txt b/requirements.txt
+index 776bf33..f5c477a 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,2 +1,6 @@
+ soda-core-postgres
+-pytest==8.3.3
+\ No newline at end of file
++pytest==8.3.3
++# Machine learning (ml_insights DAG)
++scikit-learn==1.5.2
++pandas>=2.1,<2.3
++numpy<2
+diff --git a/tests/ml_test.py b/tests/ml_test.py
+new file mode 100644
+index 0000000..bb65fcf
+--- /dev/null
++++ b/tests/ml_test.py
+@@ -0,0 +1,85 @@
++import pandas as pd
++import pytest
++
++# Importing airflow in conftest adds the dags folder to the path
++from ml.features import (
++    add_features,
++    add_success_label,
++    build_topics,
++    find_similar_videos,
++    normalize_text,
++    train_success_model,
++)
++
++
++@pytest.fixture
++def sample_videos():
++    # Two clear topics (gold / dollar) with 10 videos each
++    titles = (
++        [f"سعر الذهب اليوم وتوقعات الذهب {i}" for i in range(10)]
++        + [f"الدولار والجنيه المصري وسعر الدولار {i}" for i in range(10)]
++    )
++    n = len(titles)
++    return pd.DataFrame({
++        "video_id": [f"vid{i:08d}" for i in range(n)],
++        "title": titles,
++        "upload_date": pd.date_range("2024-01-01", periods=n, freq="15D"),
++        "duration_minutes": [5 + i for i in range(n)],
++        "video_type": ["Shorts" if i % 5 == 0 else "Normal" for i in range(n)],
++        "views": [1000 * (i + 1) for i in range(n)],
++    })
++
++
++def test_normalize_text():
++    # Hamza forms, ta marbuta, alef maqsura and diacritics are unified
++    assert normalize_text("إقتصادُ مصرَ؟") == "اقتصاد مصر"
++    assert normalize_text("الأزمة") == "الازمه"
++    assert normalize_text("على") == "علي"
++
++
++def test_build_topics(sample_videos):
++    topic_ids, topics = build_topics(sample_videos["title"], k_range=range(2, 4))
++
++    assert len(topic_ids) == len(sample_videos)
++    assert set(topics.columns) == {"topic_id", "topic_label", "top_terms"}
++    # Gold videos and dollar videos must not be in the same topic
++    assert topic_ids[0] != topic_ids[-1]
++
++
++def test_add_features(sample_videos):
++    df = add_features(sample_videos)
++
++    assert df.loc[0, "is_short"] == 1
++    assert df.loc[1, "is_short"] == 0
++    assert df["weekday"].between(0, 6).all()
++    assert df["title_has_number"].all()
++
++
++def test_add_success_label(sample_videos):
++    df = add_success_label(sample_videos)
++
++    # Inside every year, about half of the videos beat the median
++    assert set(df["is_success"].unique()) == {0, 1}
++
++
++def test_train_success_model(sample_videos):
++    df = add_success_label(add_features(sample_videos))
++    df["topic_id"] = [0] * 10 + [1] * 10
++
++    predictions, importance, metrics = train_success_model(df)
++
++    assert len(predictions) == len(df)
++    assert predictions["success_probability"].between(0, 1).all()
++    assert "topic" in importance["feature"].values
++    assert set(metrics) == {"roc_auc", "videos", "success_rate"}
++
++
++def test_find_similar_videos(sample_videos):
++    similar = find_similar_videos(sample_videos, top_n=3)
++
++    assert len(similar) == len(sample_videos) * 3
++    # A video is never similar to itself
++    assert (similar["video_id"] != similar["similar_video_id"]).all()
++    # The closest video to a gold video is another gold video
++    first = similar[(similar["video_id"] == "vid00000000") & (similar["similar_rank"] == 1)]
++    assert first["similar_video_id"].iloc[0] in set(sample_videos["video_id"][:10])
+diff --git a/tests/unit_test.py b/tests/unit_test.py
+index 63ee3fa..d1568e0 100644
+--- a/tests/unit_test.py
++++ b/tests/unit_test.py
+@@ -23,7 +23,7 @@ def test_dags_integrity(dagbag):
+     print("Import errors:", dagbag.import_errors)
+ 
+     # 2. All expected DAGs are loaded
+-    expected_dag_ids = ["produce_json", "update_db", "data_quality"]
++    expected_dag_ids = ["produce_json", "update_db", "data_quality", "ml_insights"]
+     loaded_dag_ids = list(dagbag.dags.keys())
+     print("=" * 30)
+     print("Loaded DAGs:", loaded_dag_ids)
+@@ -32,7 +32,7 @@ def test_dags_integrity(dagbag):
+         assert dag_id in loaded_dag_ids, f"DAG {dag_id} is missing"
+ 
+     # 3. Number of DAGs is correct
+-    assert dagbag.size() == 3
++    assert dagbag.size() == 4
+     print("=" * 30)
+     print("Number of DAGs:", dagbag.size())
+ 
+@@ -41,6 +41,7 @@ def test_dags_integrity(dagbag):
+         "produce_json": 5,
+         "update_db": 3,
+         "data_quality": 2,
++        "ml_insights": 3,
+     }
+     print("=" * 30)
+ 
+-- 
+2.43.0
