@@ -347,10 +347,3 @@ Open `PBI_Dashboard.pbix` and point the PostgreSQL source to `127.0.0.1:5432`, d
 - **Fair success label.** Comparing every video with the median of its own upload year
   stops older videos from looking better just because they had more time to collect views.
 
----
-
-## Acknowledgements
-
-The pipeline, Docker setup, testing and CI/CD follow the Udemy course
-**Data Engineering Project: SQL, Python, Airflow, Docker, CI/CD**
-The Power BI dashboard and the machine learning DAG are my own extensions of the project.
