@@ -11,6 +11,7 @@ from api.video_stats import (
 )
 from datawarehouse.dwh import staging_table, core_table
 from dataquality.soda import yt_elt_data_quality
+from ml.insights import build_video_topics, train_success, similar_videos
 
 # Local timezone (Egypt)
 local_tz = pendulum.timezone("Africa/Cairo")
@@ -94,3 +95,22 @@ with DAG(
 
     # Task dependencies
     soda_validate_staging >> soda_validate_core
+
+
+# DAG 4: machine learning insights for the Power BI dashboard
+with DAG(
+    dag_id="ml_insights",
+    default_args=default_args,
+    description="DAG to build topics, a success model and similar videos into the reporting schema",
+    schedule="0 17 * * *",  # Every day at 5 PM, after data_quality
+    catchup=False,
+) as dag_ml:
+
+    # Define tasks
+    topics = build_video_topics()
+    success = train_success()
+    similar = similar_videos()
+
+    # Task dependencies: the success model uses the topics as a feature,
+    # similar videos does not depend on anything
+    topics >> success

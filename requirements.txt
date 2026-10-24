@@ -1,2 +1,6 @@
 soda-core-postgres
 pytest==8.3.3
+# Machine learning (ml_insights DAG)
+scikit-learn==1.5.2
+pandas>=2.1,<2.3
+numpy<2
