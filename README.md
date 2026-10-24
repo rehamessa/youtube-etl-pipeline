@@ -352,5 +352,5 @@ Open `PBI_Dashboard.pbix` and point the PostgreSQL source to `127.0.0.1:5432`, d
 ## Acknowledgements
 
 The pipeline, Docker setup, testing and CI/CD follow the Udemy course
-**Data Engineering Project: SQL, Python, Airflow, Docker, CI/CD** by Matthew Schembri.
+**Data Engineering Project: SQL, Python, Airflow, Docker, CI/CD**
 The Power BI dashboard and the machine learning DAG are my own extensions of the project.
